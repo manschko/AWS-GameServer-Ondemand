@@ -37,6 +37,7 @@ export const resolveConfig = (): StackConfig => ({
     process.env.MINECRAFT_IMAGE_ENV_VARS_JSON
   ),
   snsEmailAddress: process.env.SNS_EMAIL_ADDRESS || '',
+  snsDiscordWebhook: process.env.SNS_DISCORD_WEBHOOK || '',
   twilio: {
     phoneFrom: process.env.TWILIO_PHONE_FROM || '',
     phoneTo: process.env.TWILIO_PHONE_TO || '',

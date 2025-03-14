@@ -128,6 +128,7 @@ export interface StackConfig {
    * email notifications each time the minecraft server is launched and ready.
    */
   snsEmailAddress: string;
+    snsDiscordWebhook: string;
   twilio: TwilioConfig;
   /**
    * Additional environment variables to be passed to the

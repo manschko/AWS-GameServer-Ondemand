@@ -109,7 +109,7 @@ export class DomainStack extends Stack {
      * picks up DNS queries.
      */
     launcherLambda.addPermission('CWPermission', {
-      principal: new iam.ServicePrincipal(
+      principal: new iam.ServicePrinycipal(
         `logs.${constants.DOMAIN_STACK_REGION}.amazonaws.com`
       ),
       action: 'lambda:InvokeFunction',
