@@ -1,6 +1,6 @@
-# minecraft-ondemand
+# AWS-GameServer-Ondemand
 
-Almost free serverless on-demand Minecraft server in AWS
+On demand GameServer for AWS forked from Minecraft Ondemand Server
 
 ## Table of Contents
 
