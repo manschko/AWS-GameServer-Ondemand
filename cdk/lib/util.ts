@@ -1,8 +1,9 @@
 import { Port } from 'aws-cdk-lib/aws-ec2';
 import { Protocol } from 'aws-cdk-lib/aws-ecs';
 import * as execa from 'execa';
-import { constants } from './constants';
 import { MinecraftEditionConfig, StackConfig } from './types';
+import fs = require('fs');
+import path = require('path');
 
 export const stringAsBoolean = (str?: string): boolean =>
   Boolean(str === 'true');
@@ -16,24 +17,14 @@ export const isDockerInstalled = (): boolean => {
   }
 };
 
-export const getMinecraftServerConfig = (
-  edition: StackConfig['minecraftEdition']
-): MinecraftEditionConfig => {
-  const javaConfig = {
-    image: constants.JAVA_EDITION_DOCKER_IMAGE,
-    port: 25565,
-    protocol: Protocol.TCP,
-    ingressRulePort: Port.tcp(25565),
-    ingressRulePortRCON: Port.tcp(25575),
-  };
-
-  const bedrockConfig = {
-    image: constants.BEDROCK_EDITION_DOCKER_IMAGE,
-    port: 19132,
-    protocol: Protocol.UDP,
-    ingressRulePort: Port.udp(19132),
-    ingressRulePortRCON: Port.tcp(25575),
-  };
-
-  return edition === 'java' ? javaConfig : bedrockConfig;
-};
+export const isLocalDockerfilePath = (imagePath:string) => {
+  try {
+    // Check if the path exists and contains a Dockerfile
+    const resolvedPath = path.resolve(imagePath);
+    return fs.existsSync(resolvedPath) && 
+            (fs.existsSync(path.join(resolvedPath, 'Dockerfile')));
+  } catch (error) {
+    console.warn(`Error checking path ${imagePath}:`, error);
+    return false;
+  }
+}

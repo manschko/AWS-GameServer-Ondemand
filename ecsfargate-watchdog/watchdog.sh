@@ -17,6 +17,7 @@ function send_notification ()
 {
   [ "$1" = "startup" ] && MESSAGETEXT="${SERVICE} is online at ${SERVERNAME}"
   [ "$1" = "shutdown" ] && MESSAGETEXT="Shutting down ${SERVICE} at ${SERVERNAME}"
+  [ "$1" = "attempting" ] && MESSAGETEXT="Attempting to start ${SERVICE} at ${SERVERNAME}"
 
   ## Twilio Option
   [ -n "$TWILIOFROM" ] && [ -n "$TWILIOTO" ] && [ -n "$TWILIOAID" ] && [ -n "$TWILIOAUTH" ] && \
@@ -49,6 +50,9 @@ function sigterm ()
   zero_service
 }
 trap sigterm SIGTERM
+
+# Send notification that we're attempting to start the server
+send_notification attempting
 
 ## get task id from the Fargate metadata
 TASK=$(curl -s ${ECS_CONTAINER_METADATA_URI_V4}/task | jq -r '.TaskARN' | awk -F/ '{ print $NF }')
@@ -88,7 +92,7 @@ EOF
 aws route53 change-resource-record-sets --hosted-zone-id $DNSZONE --change-batch file://dns-update.json
 
 ## Wait for server to start up by checking for listening ports
-echo "Waiting for $SERVER_NAME to start listening on ports..."
+echo "Waiting for $SERVERNAME to start listening on ports..."
 echo "If we are stuck here, the game server container probably failed to start. Waiting 10 minutes just in case..."
 
 COUNTER=0
@@ -129,7 +133,7 @@ if [ $SERVER_STARTED -eq 0 ]; then
   zero_service
 fi
 
-echo "$SERVER_NAME is now ready!"
+echo "$SERVERNAME is now ready!"
 send_notification startup
 
 # Function to check for active connections
@@ -145,37 +149,18 @@ check_connections() {
   fi
   
   # Check UDP connections if ports specified
-  # Note: This is more complex as UDP is connectionless
-  # You might need to implement game-specific checks here
-  
-  # Run custom connection check if provided
-  if [ -n "$CONNECTION_CHECK_COMMAND" ]; then
-    CUSTOM_CONN=$(eval "$CONNECTION_CHECK_COMMAND")
-    [ -n "$CUSTOM_CONN" ] && CONNECTIONS=$(($CONNECTIONS + $CUSTOM_CONN))
-  fi
-  
-  echo $CONNECTIONS
-}
-
-# Function to check for active connections
-check_connections() {
-  CONNECTIONS=0
-  
-  # Check TCP connections if ports specified
-  if [ -n "$GAME_TCP_PORTS" ]; then
-    for PORT in $(echo $GAME_TCP_PORTS | tr ',' ' '); do
-      TCP_CONN=$(netstat -atn | grep ":$PORT" | grep ESTABLISHED | wc -l)
-      CONNECTIONS=$(($CONNECTIONS + $TCP_CONN))
+  if [ -n "$GAME_UDP_PORTS" ]; then
+    for PORT in $(echo $GAME_UDP_PORTS | tr ',' ' '); do
+      # For UDP, we count any sockets in the TIME_WAIT or ESTABLISHED state as active connections
+      UDP_CONN=$(netstat -aun | grep ":$PORT" | egrep -v "LISTEN|TIME_WAIT" | wc -l)
+      CONNECTIONS=$(($CONNECTIONS + $UDP_CONN))
     done
   fi
   
-  # Check UDP connections if ports specified
-  # Note: This is more complex as UDP is connectionless
-  # You might need to implement game-specific checks here
   
   # Run custom connection check if provided
-  if [ -n "$CONNECTION_CHECK_COMMAND" ]; then
-    CUSTOM_CONN=$(eval "$CONNECTION_CHECK_COMMAND")
+  if [ -n "$CUSTOM_CHECK_COMMAND" ]; then
+    CUSTOM_CONN=$(eval "$CUSTOM_CHECK_COMMAND")
     [ -n "$CUSTOM_CONN" ] && CONNECTIONS=$(($CONNECTIONS + $CUSTOM_CONN))
   fi
   

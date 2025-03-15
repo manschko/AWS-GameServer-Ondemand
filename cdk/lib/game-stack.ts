@@ -14,17 +14,17 @@ import {
     ArnFormat,
 } from 'aws-cdk-lib';
 import {Construct} from 'constructs';
-import {constants} from './constants';
 import {SSMParameterReader} from './ssm-parameter-reader';
 import {StackConfig} from './types';
-import {getMinecraftServerConfig, isDockerInstalled} from './util';
+import {isDockerInstalled, isLocalDockerfilePath} from './util';
+import { Port } from 'aws-cdk-lib/aws-ec2';
 
-interface MinecraftStackProps extends StackProps {
+interface GameStackProps extends StackProps {
     config: Readonly<StackConfig>;
 }
 
-export class MinecraftStack extends Stack {
-    constructor(scope: Construct, id: string, props: MinecraftStackProps) {
+export class GameStack extends Stack {
+    constructor(scope: Construct, id: string, props: GameStackProps) {
         super(scope, id, props);
 
         const {config} = props;
@@ -43,7 +43,7 @@ export class MinecraftStack extends Stack {
 
         const accessPoint = new efs.AccessPoint(this, 'AccessPoint', {
             fileSystem,
-            path: '/minecraft',
+            path: `/${config.subdomainPart}`,
             posixUser: {
                 uid: '1000',
                 gid: '1000',
@@ -77,13 +77,13 @@ export class MinecraftStack extends Stack {
 
         const ecsTaskRole = new iam.Role(this, 'TaskRole', {
             assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
-            description: 'Minecraft ECS task role',
+            description: `${config.subdomainPart} ECS task role`,
         });
 
         efsReadWriteDataPolicy.attachToRole(ecsTaskRole);
 
         const cluster = new ecs.Cluster(this, 'Cluster', {
-            clusterName: constants.CLUSTER_NAME,
+            clusterName: config.gameName,
             vpc,
             containerInsights: true, // TODO: Add config for container insights
             enableFargateCapacityProviders: true,
@@ -98,7 +98,7 @@ export class MinecraftStack extends Stack {
                 cpu: config.taskCpu,
                 volumes: [
                     {
-                        name: constants.ECS_VOLUME_NAME,
+                        name: `${config.gameName}-data`,
                         efsVolumeConfiguration: {
                             fileSystemId: fileSystem.fileSystemId,
                             transitEncryption: 'ENABLED',
@@ -112,61 +112,90 @@ export class MinecraftStack extends Stack {
             }
         );
 
-        const minecraftServerConfig = getMinecraftServerConfig(
-            config.minecraftEdition
-        );
+        // Create port mappings from the game server configuration
+        const portMappings: ecs.PortMapping[] = [];
+        
+        // Add TCP ports
+        if (config.tcpPorts?.length) {
+            config.tcpPorts.forEach(port => {
+                portMappings.push({
+                    containerPort: parseInt(port),
+                    hostPort: parseInt(port),
+                    protocol: ecs.Protocol.TCP
+                });
+            });
+        }
+        
+        // Add UDP ports
+        if (config.udpPorts?.length) {
+            config.udpPorts.forEach(port => {
+                portMappings.push({
+                    containerPort: parseInt(port),
+                    hostPort: parseInt(port),
+                    protocol: ecs.Protocol.UDP
+                });
+            });
+        }
 
-        const minecraftServerContainer = new ecs.ContainerDefinition(
+        const gameServerContainer = new ecs.ContainerDefinition(
             this,
-            'ServerContainer',
+            'GameServerContainer',
             {
-                containerName: constants.MC_SERVER_CONTAINER_NAME,
-                image: ecs.ContainerImage.fromRegistry(minecraftServerConfig.image),
-                portMappings: [
-                    {
-                        containerPort: minecraftServerConfig.port,
-                        hostPort: minecraftServerConfig.port,
-                        protocol: minecraftServerConfig.protocol,
-                    },
-                ],
-                environment: config.minecraftImageEnv,
-                essential: false,
-                taskDefinition,
-                logging: config.debug
-                    ? new ecs.AwsLogDriver({
-                        logRetention: logs.RetentionDays.THREE_DAYS,
-                        streamPrefix: constants.MC_SERVER_CONTAINER_NAME,
-                    })
-                    : undefined,
+              containerName: `${config.gameName}-server`, 
+              image: !isLocalDockerfilePath(config.gameServerImage)
+                ? ecs.ContainerImage.fromRegistry(config.gameServerImage)
+                : ecs.ContainerImage.fromAsset(config.gameServerImage),
+              portMappings: portMappings,
+              environment: config.containerImageEnv || {},
+              essential: false,
+              taskDefinition,
+              logging: config.debug
+                ? new ecs.AwsLogDriver({
+                    logRetention: logs.RetentionDays.THREE_DAYS,
+                    streamPrefix: `${config.gameName}-server`,
+                  })
+                : undefined,
             }
-        );
-
-        minecraftServerContainer.addMountPoints({
-            containerPath: '/data',
-            sourceVolume: constants.ECS_VOLUME_NAME,
+          );
+          
+          gameServerContainer.addMountPoints({
+            containerPath: config.ecsVolumeName,
+            sourceVolume: `${config.gameName}-data`,
             readOnly: false,
-        });
+          });
 
         const serviceSecurityGroup = new ec2.SecurityGroup(
             this,
             'ServiceSecurityGroup',
             {
                 vpc,
-                description: 'Security group for Minecraft on-demand',
+                description: `Security group for ${config.subdomainPart} on-demand`,
             }
         );
 
-        serviceSecurityGroup.addIngressRule(
-            ec2.Peer.anyIpv4(),
-            minecraftServerConfig.ingressRulePort
-        );
+        // Add all TCP ports to security group
+        if (config.tcpPorts?.length) {
+            config.tcpPorts.forEach(port => {
+                serviceSecurityGroup.addIngressRule(
+                    ec2.Peer.anyIpv4(),
+                    ec2.Port.tcp(parseInt(port)),
+                    `Allow ${config.subdomainPart} TCP port ${port}`
+                );
+            });
+        }
+        
+        // Add all UDP ports to security group
+        if (config.udpPorts?.length) {
+            config.udpPorts.forEach(port => {
+                serviceSecurityGroup.addIngressRule(
+                    ec2.Peer.anyIpv4(),
+                    ec2.Port.udp(parseInt(port)),
+                    `Allow ${config.subdomainPart} UDP port ${port}`
+                );
+            });
+        }
 
-        serviceSecurityGroup.addIngressRule(
-            ec2.Peer.anyIpv4(),
-            minecraftServerConfig.ingressRulePortRCON
-        );
-
-        const minecraftServerService = new ecs.FargateService(
+        const gameServerService = new ecs.FargateService(
             this,
             'FargateService',
             {
@@ -182,7 +211,7 @@ export class MinecraftStack extends Stack {
                 ],
                 taskDefinition: taskDefinition,
                 platformVersion: ecs.FargatePlatformVersion.LATEST,
-                serviceName: constants.SERVICE_NAME,
+                serviceName: `${config.gameName}-server`,
                 desiredCount: 0,
                 assignPublicIp: true,
                 securityGroups: [serviceSecurityGroup],
@@ -191,7 +220,7 @@ export class MinecraftStack extends Stack {
 
         /* Allow access to EFS from Fargate service security group */
         fileSystem.connections.allowDefaultPortFrom(
-            minecraftServerService.connections
+            gameServerService.connections
         );
 
 
@@ -200,16 +229,16 @@ export class MinecraftStack extends Stack {
             this,
             'Route53HostedZoneIdReader',
             {
-                parameterName: constants.HOSTED_ZONE_SSM_PARAMETER,
-                region: constants.DOMAIN_STACK_REGION,
+                parameterName: `${config.gameName}HostedZoneID`,
+                region: 'us-east-1',
             }
         ).getParameterValue();
 
         let snsTopicArn = '';
         /* Create SNS Topic if SNS_EMAIL is provided */
-        if (config.snsEmailAddress || config.snsDiscordWebhook) {
+        if (config.snsEmailAddress) {
             const snsTopic = new sns.Topic(this, 'ServerSnsTopic', {
-                displayName: 'Minecraft Server Notifications',
+                displayName: `${config.subdomainPart} Server Notifications`,
             });
 
             snsTopic.grantPublish(ecsTaskRole);
@@ -225,26 +254,6 @@ export class MinecraftStack extends Stack {
                     }
                 );
             }
-            if(config.snsDiscordWebhook) {
-                const snsLambda = new lambda.Function(this, 'DiscordNotifier', {
-                    runtime: lambda.Runtime.PYTHON_3_8, // or any other runtime you prefer
-                    handler: 'lambda_sns_function.notifyDiscordWebhook', // specify the file and the export to use as the handler
-                    code: lambda.Code.fromAsset(path.join(__dirname, '../../notifier')), // replace with the path to your lambda code
-                    environment: {
-                        WEBHOOK: config.snsDiscordWebhook,
-                    },
-                });
-                const discordSubscription = new sns.Subscription(
-                    this,
-                    'DiscordSubscription',
-                    {
-                        protocol: sns.SubscriptionProtocol.LAMBDA,
-                        topic: snsTopic,
-                        endpoint: snsLambda.functionArn,
-                    }
-                );
-            }
-
             snsTopicArn = snsTopic.topicArn;
 
         }
@@ -253,19 +262,19 @@ export class MinecraftStack extends Stack {
             this,
             'WatchDogContainer',
             {
-                containerName: constants.WATCHDOG_SERVER_CONTAINER_NAME,
+                containerName: `${config.gameName}-ecsfargate-watchdog`,
                 image: isDockerInstalled()
                     ? ecs.ContainerImage.fromAsset(
-                        path.resolve(__dirname, '../../minecraft-ecsfargate-watchdog/')
+                        path.resolve(__dirname, '../../ecsfargate-watchdog/')
                     )
                     : ecs.ContainerImage.fromRegistry(
-                        'doctorray/minecraft-ecsfargate-watchdog'
+                        'doctorray/ecsfargate-watchdog'
                     ),
                 essential: true,
                 taskDefinition: taskDefinition,
                 environment: {
-                    CLUSTER: constants.CLUSTER_NAME,
-                    SERVICE: constants.SERVICE_NAME,
+                    CLUSTER: config.gameName,
+                    SERVICE: `${config.gameName}-server`,
                     DNSZONE: hostedZoneId,
                     SERVERNAME: `${config.subdomainPart}.${config.domainName}`,
                     SNSTOPIC: snsTopicArn,
@@ -275,11 +284,15 @@ export class MinecraftStack extends Stack {
                     TWILIOAUTH: config.twilio.authCode,
                     STARTUPMIN: config.startupMinutes,
                     SHUTDOWNMIN: config.shutdownMinutes,
+                    GAME_TCP_PORTS: config.tcpPorts ? config.tcpPorts.join(',') : '',
+                    GAME_UDP_PORTS: config.udpPorts ? config.udpPorts.join(',') : '',
+                    CUSTOM_CHECK_COMMAND: config.customCheckCommand,
+                    DISCORD_WEBHOOK: config.discordWebhook
                 },
                 logging: config.debug
                     ? new ecs.AwsLogDriver({
                         logRetention: logs.RetentionDays.THREE_DAYS,
-                        streamPrefix: constants.WATCHDOG_SERVER_CONTAINER_NAME,
+                        streamPrefix: `${config.gameName}-ecsfargate-watchdog`,
                     })
                     : undefined,
             }
@@ -292,13 +305,13 @@ export class MinecraftStack extends Stack {
                     effect: iam.Effect.ALLOW,
                     actions: ['ecs:*'],
                     resources: [
-                        minecraftServerService.serviceArn,
+                        gameServerService.serviceArn,
                         /* arn:aws:ecs:<region>:<account_number>:task/minecraft/* */
                         Arn.format(
                             {
                                 service: 'ecs',
                                 resource: 'task',
-                                resourceName: `${constants.CLUSTER_NAME}/*`,
+                                resourceName: `${config.gameName}/*`,
                                 arnFormat: ArnFormat.SLASH_RESOURCE_NAME,
                             },
                             this
@@ -322,8 +335,8 @@ export class MinecraftStack extends Stack {
             this,
             'launcherLambdaRoleArn',
             {
-                parameterName: constants.LAUNCHER_LAMBDA_ARN_SSM_PARAMETER,
-                region: constants.DOMAIN_STACK_REGION,
+                parameterName: 'LauncherLambdaRoleArn',
+                region: 'us-east-1',
             }
         ).getParameterValue();
         const launcherLambdaRole = iam.Role.fromRoleArn(

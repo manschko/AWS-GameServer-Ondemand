@@ -14,7 +14,6 @@ import {
   ArnFormat,
 } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-import { constants } from './constants';
 import { CWGlobalResourcePolicy } from './cw-global-resource-policy';
 import { RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { StackConfig } from './types';
@@ -50,7 +49,7 @@ export class DomainStack extends Stack {
             {
               resource: 'log-group',
               service: 'logs',
-              resourceName: '*',
+              resourceName: queryLogGroup.logGroupName,
               arnFormat: ArnFormat.COLON_RESOURCE_NAME,
             },
             this
@@ -98,8 +97,8 @@ export class DomainStack extends Stack {
       runtime: lambda.Runtime.PYTHON_3_8,
       environment: {
         REGION: config.serverRegion,
-        CLUSTER: constants.CLUSTER_NAME,
-        SERVICE: constants.SERVICE_NAME,
+        CLUSTER: config.gameName,
+        SERVICE: `${config.gameName}-server`,
       },
       logRetention: logs.RetentionDays.THREE_DAYS, // TODO: parameterize
     });
@@ -109,8 +108,8 @@ export class DomainStack extends Stack {
      * picks up DNS queries.
      */
     launcherLambda.addPermission('CWPermission', {
-      principal: new iam.ServicePrinycipal(
-        `logs.${constants.DOMAIN_STACK_REGION}.amazonaws.com`
+      principal: new iam.ServicePrincipal(
+        `logs.us-east-1.amazonaws.com`
       ),
       action: 'lambda:InvokeFunction',
       sourceAccount: this.account,
@@ -135,7 +134,7 @@ export class DomainStack extends Stack {
     new ssm.StringParameter(this, 'HostedZoneParam', {
       allowedPattern: '.*',
       description: 'Hosted zone ID for minecraft server',
-      parameterName: constants.HOSTED_ZONE_SSM_PARAMETER,
+      parameterName: `${config.gameName}HostedZoneID`,
       stringValue: rootHostedZone.hostedZoneId,
     });
 
@@ -147,7 +146,7 @@ export class DomainStack extends Stack {
     new ssm.StringParameter(this, 'LauncherLambdaParam', {
       allowedPattern: '.*S.*',
       description: 'Minecraft launcher execution role ARN',
-      parameterName: constants.LAUNCHER_LAMBDA_ARN_SSM_PARAMETER,
+      parameterName: 'LauncherLambdaRoleArn',
       stringValue: launcherLambda.role?.roleArn || '',
     });
   }

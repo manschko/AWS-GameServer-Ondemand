@@ -1,5 +1,6 @@
 import type { Protocol } from 'aws-cdk-lib/aws-ecs';
 import type { Port } from 'aws-cdk-lib/aws-ec2';
+import { StringParameter } from 'aws-cdk-lib/aws-ssm';
 
 interface TwilioConfig {
   /**
@@ -26,7 +27,7 @@ interface TwilioConfig {
   authCode: string;
 }
 
-export type MinecraftImageEnv = Record<string, string>;
+export type ContainerImageEnv = Record<string, string>;
 
 export type MinecraftEdition = 'java' | 'bedrock';
 
@@ -50,13 +51,6 @@ export interface StackConfig {
    * @default "us-east-1"
    */
   serverRegion: string;
-  /**
-   * Edition of Minecraft server to run. Accepted values are are `java` or `bedrock` for [Minecraft Java Docker] or
-   * [Minecraft Bedrock Docker], respectively.
-   *
-   * @default "java"
-   */
-  minecraftEdition: MinecraftEdition;
   /**
    * Number of minutes to wait for a connection after starting before terminating (optional, default 10)
    *
@@ -128,16 +122,16 @@ export interface StackConfig {
    * email notifications each time the minecraft server is launched and ready.
    */
   snsEmailAddress: string;
-    snsDiscordWebhook: string;
+  discordWebhook: string;
   twilio: TwilioConfig;
   /**
    * Additional environment variables to be passed to the
    * [Minecraft Docker Server](https://github.com/itzg/docker-minecraft-server/blob/master/README.md)
    * [Minecraft Bedrock Docker](https://github.com/itzg/docker-minecraft-bedrock-server/blob/master/README.md)
    *
-   * @default '{ "EULA": "TRUE" }'
+   * 
    */
-  minecraftImageEnv: MinecraftImageEnv;
+  containerImageEnv: ContainerImageEnv;
   /**
    * Setting to `true` enables debug mode.
    *
@@ -146,6 +140,12 @@ export interface StackConfig {
    * - CloudWatch Logs for the `minecraft-ecsfargate-watchdog` ECS Container
    */
   debug: boolean;
+  tcpPorts: string[];
+  udpPorts: string[];
+  customCheckCommand: string;
+  gameName: string;
+  ecsVolumeName: string;
+  gameServerImage: string;
 }
 
 export interface MinecraftEditionConfig {
