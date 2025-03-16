@@ -42,7 +42,6 @@ export interface StackConfig {
    * (minecraft.example.com) and an NS record on your existing (example.com)
    * hosted zone. This subdomain should not already be in use.
    *
-   * @default "minecraft"
    */
   subdomainPart: string;
   /**

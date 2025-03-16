@@ -49,7 +49,7 @@ export class DomainStack extends Stack {
             {
               resource: 'log-group',
               service: 'logs',
-              resourceName: queryLogGroup.logGroupName,
+              resourceName: '*',
               arnFormat: ArnFormat.COLON_RESOURCE_NAME,
             },
             this
@@ -67,8 +67,25 @@ export class DomainStack extends Stack {
       domainName: config.domainName,
     });
 
+    const subdomainHostedZone = new route53.HostedZone(
+      this,
+      'SubdomainHostedZone',
+      {
+        zoneName: subdomain,
+        queryLogsLogGroupArn: queryLogGroup.logGroupArn,
+      }
+    );
+
     /* Resource policy for CloudWatch Logs is needed before the zone can be created */
-    rootHostedZone.node.addDependency(cloudwatchLogResourcePolicy);
+    subdomainHostedZone.node.addDependency(cloudwatchLogResourcePolicy);
+    /* Ensure we hvae an existing hosted zone before creating our delegated zone */
+    subdomainHostedZone.node.addDependency(rootHostedZone);
+
+    const nsRecord = new route53.NsRecord(this, 'NSRecord', {
+      zone: rootHostedZone,
+      values: subdomainHostedZone.hostedZoneNameServers as string[],
+      recordName: subdomain,
+    });
 
     const aRecord = new route53.ARecord(this, 'ARecord', {
       target: {
@@ -85,7 +102,7 @@ export class DomainStack extends Stack {
        */
       ttl: Duration.seconds(30),
       recordName: subdomain,
-      zone: rootHostedZone,
+      zone: subdomainHostedZone,
     });
 
     /* Set dependency on A record to ensure it is removed first on deletion */
@@ -109,7 +126,7 @@ export class DomainStack extends Stack {
      */
     launcherLambda.addPermission('CWPermission', {
       principal: new iam.ServicePrincipal(
-        `logs.us-east-1.amazonaws.com`
+        `logs.${this.region}.amazonaws.com`
       ),
       action: 'lambda:InvokeFunction',
       sourceAccount: this.account,
@@ -124,7 +141,7 @@ export class DomainStack extends Stack {
 
     queryLogGroup.addSubscriptionFilter('SubscriptionFilter', {
       destination: new logDestinations.LambdaDestination(launcherLambda),
-      filterPattern: logs.FilterPattern.anyTerm(dnsFilterPattern),
+      filterPattern: logs.FilterPattern.anyTerm(subdomain),
     });
 
     /**
@@ -135,7 +152,7 @@ export class DomainStack extends Stack {
       allowedPattern: '.*',
       description: 'Hosted zone ID for minecraft server',
       parameterName: `${config.gameName}HostedZoneID`,
-      stringValue: rootHostedZone.hostedZoneId,
+      stringValue: subdomainHostedZone.hostedZoneId,
     });
 
     /**
@@ -145,7 +162,7 @@ export class DomainStack extends Stack {
      */
     new ssm.StringParameter(this, 'LauncherLambdaParam', {
       allowedPattern: '.*S.*',
-      description: 'Minecraft launcher execution role ARN',
+      description: `${config.gameName} launcher execution role ARN`,
       parameterName: 'LauncherLambdaRoleArn',
       stringValue: launcherLambda.role?.roleArn || '',
     });

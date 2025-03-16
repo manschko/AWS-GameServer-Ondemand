@@ -67,9 +67,9 @@ PUBLICIP=$(aws ec2 describe-network-interfaces --network-interface-ids $ENI --qu
 echo "I believe our public IP address is $PUBLICIP"
 
 ## update public dns record
-echo "Updating DNS record for $SERVERNAME to $PUBLICIP"
+echo "Updating DNS record for $SERVERNAME to $PUBLICIP in Zone $DNSZONE"
 ## prepare json file
-cat << EOF >> dns-update.json
+cat << EOF > dns-update.json
 {
   "Comment": "Fargate Public IP change for ${SERVERNAME}",
   "Changes": [
@@ -140,34 +140,23 @@ send_notification startup
 check_connections() {
   CONNECTIONS=0
   
+  # Run custom connection check if provided
+  if [ -n "$CUSTOM_CHECK_COMMAND" ]; then
+    CUSTOM_CONN=$(eval "$CUSTOM_CHECK_COMMAND")
+    [ -n "$CUSTOM_CONN" ] && CONNECTIONS=$CUSTOM_CONN
+  
   # Check TCP connections if ports specified
-  if [ -n "$GAME_TCP_PORTS" ]; then
+  elif [ -n "$GAME_TCP_PORTS" ]; then
     for PORT in $(echo $GAME_TCP_PORTS | tr ',' ' '); do
       TCP_CONN=$(netstat -atn | grep ":$PORT" | grep ESTABLISHED | wc -l)
       CONNECTIONS=$(($CONNECTIONS + $TCP_CONN))
     done
   fi
   
-  # Check UDP connections if ports specified
-  if [ -n "$GAME_UDP_PORTS" ]; then
-    for PORT in $(echo $GAME_UDP_PORTS | tr ',' ' '); do
-      # For UDP, we count any sockets in the TIME_WAIT or ESTABLISHED state as active connections
-      UDP_CONN=$(netstat -aun | grep ":$PORT" | egrep -v "LISTEN|TIME_WAIT" | wc -l)
-      CONNECTIONS=$(($CONNECTIONS + $UDP_CONN))
-    done
-  fi
-  
-  
-  # Run custom connection check if provided
-  if [ -n "$CUSTOM_CHECK_COMMAND" ]; then
-    CUSTOM_CONN=$(eval "$CUSTOM_CHECK_COMMAND")
-    [ -n "$CUSTOM_CONN" ] && CONNECTIONS=$(($CONNECTIONS + $CUSTOM_CONN))
-  fi
-  
   echo $CONNECTIONS
 }
 
-echo "Checking every 1 minute for active connections to $SERVER_NAME, up to $STARTUPMIN minutes..."
+echo "Checking every 1 minute for active connections to $SERVERNAME, up to $STARTUPMIN minutes..."
 COUNTER=0
 CONNECTED=0
 while [ $CONNECTED -lt 1 ]

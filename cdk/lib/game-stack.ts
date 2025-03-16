@@ -157,12 +157,15 @@ export class GameStack extends Stack {
                 : undefined,
             }
           );
+          config.ecsVolumeName.split(',').forEach(mountPath => {
+            gameServerContainer.addMountPoints({
+                containerPath: mountPath,
+                sourceVolume: `${config.gameName}-data`,
+                readOnly: false,
+              });
+          })
           
-          gameServerContainer.addMountPoints({
-            containerPath: config.ecsVolumeName,
-            sourceVolume: `${config.gameName}-data`,
-            readOnly: false,
-          });
+          
 
         const serviceSecurityGroup = new ec2.SecurityGroup(
             this,
@@ -348,7 +351,7 @@ export class GameStack extends Stack {
 
         /**
          * This policy gives permission to our ECS task to update the A record
-         * associated with our minecraft server. Retrieve the hosted zone identifier
+         * associated with our game server. Retrieve the hosted zone identifier
          * from Route 53 and place it in the Resource line within this policy.
          */
         const iamRoute53Policy = new iam.Policy(this, 'IamRoute53Policy', {
