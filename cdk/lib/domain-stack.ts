@@ -111,7 +111,7 @@ export class DomainStack extends Stack {
     const launcherLambda = new lambda.Function(this, 'LauncherLambda', {
       code: lambda.Code.fromAsset(path.resolve(__dirname, '../../lambda')),
       handler: 'lambda_function.lambda_handler',
-      runtime: lambda.Runtime.PYTHON_3_8,
+      runtime: lambda.Runtime.PYTHON_3_12,
       environment: {
         REGION: config.serverRegion,
         CLUSTER: config.gameName,

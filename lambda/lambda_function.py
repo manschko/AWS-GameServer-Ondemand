@@ -37,24 +37,3 @@ def lambda_handler(event, context):
         print("Updated desiredCount to 1")
     else:
         print("desiredCount already at 1")
-
-
-def notifyDiscordWebhook():
-    url = urllib.parse.urlparse(WEBHOOK)
-    conn = http.client.HTTPSConnection(url.netloc)
-
-    headers = { 'Content-Type': 'application/json' }
-    # Extract the message from the SNS event
-    message = "attempting to Start Minecraft"
-
-    # Prepare the data to send to Discord
-    data = {
-        "content": message  # You can add more fields if you want to customize the Discord message
-    }
-
-    conn.request("POST", url.path + "?" + url.query, body=json.dumps(data), headers=headers)
-    res = conn.getresponse()
-
-    # Check the response
-    if res.status != 204:
-        raise ValueError(f'Request to Discord returned an error {res.status}, the response is:\n{res.read().decode()}')
